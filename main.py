@@ -9,7 +9,7 @@ API_TOKEN = "8759756266:AAEYPEszDYC1x3Z1pfh-RH-j2bFgFY2XB84"
 bot = telebot.TeleBot(API_TOKEN)
 
 # अपनी असली Telegram ID यहाँ लिखें
-ALLOWED_USER_ID = 8726975283 
+ALLOWED_USER_ID =  5177831693
 
 app = Flask(__name__)
 @app.route('/')
