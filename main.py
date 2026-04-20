@@ -5,7 +5,7 @@ from flask import Flask
 from urllib.parse import quote
 
 # --- CONFIGURATION ---
-API_TOKEN = "8759756266:AAEYPEszDYC1x3Z1pfh-RH-j2bFgFY2XB84"
+API_TOKEN = "8759756266:AAFVCXuYGFQxPuPYr1q6_TQUEGyjjRGEA_Q"
 bot = telebot.TeleBot(API_TOKEN)
 
 # अपनी असली Telegram ID यहाँ लिखें
