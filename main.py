@@ -5,11 +5,10 @@ from flask import Flask
 from urllib.parse import quote
 
 # --- CONFIGURATION ---
-API_TOKEN = "8759756266:AAFVCXuYGFQxPuPYr1q6_TQUEGyjjRGEA_Q"
+API_TOKEN = "8759756266:AAFVCXuYGFQxPuPYr1q6_TQUEGyjjRGEA_Q" # <-- अपना नया टोकन यहाँ डालें
 bot = telebot.TeleBot(API_TOKEN)
 
-# अपनी असली Telegram ID यहाँ लिखें
-ALLOWED_USER_ID =  5177831693
+ALLOWED_USER_ID = 5177831693 
 
 app = Flask(__name__)
 @app.route('/')
@@ -18,13 +17,13 @@ def home(): return "Bot is Alive!"
 def run_server():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-VOICES = {"B": "hi-IN-MadhurNeural", "G": "hi-IN-SwaraNeural", "E": "hi-IN-NeerjaNeural"}
+# यहाँ आवाज़ें (Voices) अपडेट की गई हैं
+VOICES = {"B": "hi-IN-MadhurNeural", "G": "hi-IN-AnanyaNeural", "E": "hi-IN-AnanyaNeural"}
 
 def auto_voice(text):
     t = text.lower()
-    if any(w in t for w in ["lalla", "kanha", "beta"]): return "B"
-    if any(w in t for w in ["maiya", "radha", "mata"]): return "G"
-    return "E"
+    if any(w in t for w in ["lalla", "kanha", "beta", "boy", "he"]): return "B"
+    return "G"
 
 def get_image(text, i):
     try:
@@ -41,14 +40,18 @@ def welcome(m):
     if m.chat.id != ALLOWED_USER_ID:
         bot.reply_to(m, "❌ Access Denied!")
         return
-    bot.reply_to(m, "🎬 **नमस्ते मालिक!** कहानी भेजें।")
+    bot.reply_to(m, "🎬 **नमस्ते मालिक!** कहानी भेजें, मैं वीडियो बनाता हूँ।")
+
+async def make_audio(text, voice, path):
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(path)
 
 @bot.message_handler(func=lambda m: True)
 def process_video(m):
     cid = m.chat.id
     if cid != ALLOWED_USER_ID: return
 
-    msg = bot.reply_to(m, "⏳ **वीडियो बन रही है...**")
+    msg = bot.reply_to(m, "⏳ **ऑडियो और वीडियो बन रहा है...**")
     sentences = [s.strip() for s in re.split(r'[।|?|!|\n]', m.text) if len(s.strip()) > 3][:6]
     clips = []
     temp_files = []
@@ -58,7 +61,10 @@ def process_video(m):
             vtype = auto_voice(line)
             v_path = f"v_{i}.mp3"; out = f"p_{i}.mp4"
             temp_files.extend([v_path, out])
-            asyncio.run(edge_tts.Communicate(line, VOICES[vtype]).save(v_path))
+            
+            # ऑडियो बनाने का नया तरीका (More Stable)
+            asyncio.run(make_audio(line, VOICES[vtype], v_path))
+            
             img_path = get_image(line, i)
             if not img_path: continue
             temp_files.append(img_path)
@@ -76,13 +82,15 @@ def process_video(m):
             list_fn = f"list_{cid}.txt"
             with open(list_fn, "w") as f:
                 for c in clips: f.write(f"file '{c}'\n")
+            
             subprocess.run(f"ffmpeg -y -f concat -safe 0 -i {list_fn} -c copy {final_vid}", shell=True)
+            
             with open(final_vid, "rb") as v:
                 bot.send_video(cid, v, caption="✅ तैयार है!")
             temp_files.extend([final_vid, list_fn])
 
     except Exception as e:
-        bot.send_message(cid, f"❌ Error: {e}")
+        bot.send_message(cid, f"❌ Error: {str(e)}")
     finally:
         for f in temp_files:
             if os.path.exists(f): os.remove(f)
@@ -91,4 +99,4 @@ def process_video(m):
 if __name__ == "__main__":
     threading.Thread(target=run_server, daemon=True).start()
     bot.polling(none_stop=True)
-    
+        
