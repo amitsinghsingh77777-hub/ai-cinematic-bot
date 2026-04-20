@@ -1,100 +1,101 @@
-import os, re, requests, asyncio, threading
+import os, re, requests, asyncio, threading, subprocess
 import telebot
 import edge_tts
 from flask import Flask
-from moviepy.editor import *
-from moviepy.config import change_settings
 from urllib.parse import quote
 
 # --- CONFIGURATION ---
-API_TOKEN = os.getenv("API_TOKEN")
-bot = telebot.TeleBot(8759756266:AAEYPEszDYC1x3Z1pfh-RH-j2bFgFY2XB84)
+API_TOKEN = "8759756266:AAEYPEszDYC1x3Z1pfh-RH-j2bFgFY2XB84"
+bot = telebot.TeleBot(API_TOKEN)
+
+# 🔐 सुरक्षा: अपनी असली Telegram ID यहाँ लिखें (जैसे: 123456789)
+ALLOWED_USER_ID = 87269 59202  # <--- यहाँ अपनी ID बदलें
 
 app = Flask(__name__)
-
 @app.route('/')
-def home(): return "Bot is Running!"
+def home(): return "Bot is Alive!"
 
 def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-def keep_alive():
-    t = threading.Thread(target=run_server)
-    t.daemon = True
-    t.start()
+# आवाज़ें (Voices)
+VOICES = {"B": "hi-IN-MadhurNeural", "G": "hi-IN-SwaraNeural", "E": "hi-IN-NeerjaNeural"}
 
-def setup_assets():
-    if not os.path.exists("font.ttf"):
-        font_url = "https://github.com"
-        r = requests.get(font_url)
-        with open("font.ttf", 'wb') as f: f.write(r.content)
-    if not os.path.exists("bgm.mp3"):
-        bgm_url = "https://bensound.com"
-        r = requests.get(bgm_url)
-        with open("bgm.mp3", 'wb') as f: f.write(r.content)
-
-async def generate_voice(text, voice, path):
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(path)
+def auto_voice(text):
+    t = text.lower()
+    if any(w in t for w in ["lalla", "kanha", "beta"]): return "B"
+    if any(w in t for w in ["maiya", "radha", "mata"]): return "G"
+    return "E"
 
 def get_image(text, i):
-    encoded_prompt = quote(f"3d disney pixar style, cinematic lighting, {text}")
-    url = f"https://pollinations.ai{encoded_prompt}?width=720&height=1280&seed={i}&model=flux&nologo=true"
     try:
+        prompt = quote(f"3d disney pixar style, {text}, cinematic lighting, 9:16 aspect ratio")
+        # यहाँ /p/ जोड़ दिया गया है (यह बहुत ज़रूरी है)
+        url = f"https://pollinations.ai/p/{prompt}?width=720&height=1280&seed={i}&model=flux&nologo=true"
         r = requests.get(url, timeout=30)
-        with open(f"img_{i}.jpg", 'wb') as f: f.write(r.content)
-        return f"img_{i}.jpg"
+        path = f"img_{i}.jpg"
+        with open(path, 'wb') as f: f.write(r.content)
+        return path
     except: return None
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
-    bot.reply_to(m, "🎬 **AI Cinematic Bot Ready!**\nSend me a story in Hindi or English.")
+    if m.chat.id != ALLOWED_USER_ID:
+        bot.reply_to(m, "❌ **Access Denied!** यह एक प्राइवेट बॉट है।")
+        return
+    bot.reply_to(m, "🎬 **नमस्ते मालिक!** कहानी भेजें, मैं वीडियो बनाता हूँ।")
 
 @bot.message_handler(func=lambda m: True)
-def process(m):
+def process_video(m):
     cid = m.chat.id
-    status = bot.reply_to(m, "⏳ **Step 1/2: Generating Voice & Visuals...**")
-    sentences = [s.strip() for s in re.split(r'[।|?|!|\n]', m.text) if len(s.strip()) > 5][:5]
+    if cid != ALLOWED_USER_ID:
+        bot.reply_to(m, "❌ Access Denied!")
+        return
+
+    msg = bot.reply_to(m, "⏳ **वीडियो बन रही है, कृपया इंतज़ार करें...**")
+    sentences = [s.strip() for s in re.split(r'[।|?|!|\n]', m.text) if len(s.strip()) > 3][:6]
     clips = []
     temp_files = []
-    
+
     try:
         for i, line in enumerate(sentences):
-            v_path = f"v_{i}.mp3"
-            img_path = f"img_{i}.jpg"
-            temp_files.extend([v_path, img_path])
-            asyncio.run(generate_voice(line, "hi-IN-SwaraNeural", v_path))
-            img = get_image(line, i)
-            if img:
-                audio = AudioFileClip(v_path)
-                txt = TextClip(line, font='font.ttf', fontsize=45, color='yellow', 
-                               method='caption', size=(650, None), stroke_color='black', stroke_width=2)
-                txt = txt.set_position(('center', 900)).set_duration(audio.duration)
-                video = ImageClip(img).set_duration(audio.duration).resize(lambda t: 1 + 0.03*t)
-                clips.append(CompositeVideoClip([video, txt]).set_audio(audio))
+            vtype = auto_voice(line)
+            v_path = f"v_{i}.mp3"; out = f"p_{i}.mp4"
+            temp_files.extend([v_path, out])
+            asyncio.run(edge_tts.Communicate(line, VOICES[vtype]).save(v_path))
+            img_path = get_image(line, i)
+            if not img_path: continue
+            temp_files.append(img_path)
+            
+            # FFmpeg कमांड
+            cmd = (
+                f'ffmpeg -y -loop 1 -i {img_path} -i {v_path} -vf '
+                f'"scale=720:1280,format=yuv420p,drawtext=text=\'{line[:40]}...\':fontcolor=yellow:fontsize=35:x=(w-text_w)/2:y=h-300:box=1:boxcolor=black@0.6" '
+                f'-c:v libx264 -preset superfast -tune stillimage -c:a aac -shortest {out}'
+            )
+            subprocess.run(cmd, shell=True)
+            if os.path.exists(out): clips.append(out)
 
         if clips:
-            bot.edit_message_text("🎞️ **Step 2/2: Rendering Video...**", cid, status.message_id)
-            final = concatenate_videoclips(clips, method="compose")
-            if os.path.exists("bgm.mp3"):
-                bgm = AudioFileClip("bgm.mp3").volumex(0.12)
-                final.audio = CompositeAudioClip([final.audio, afx.audio_loop(bgm, duration=final.duration)])
-            out_file = f"vid_{cid}.mp4"
-            final.write_videofile(out_file, fps=24, codec="libx264", audio_codec="aac", threads=4)
-            with open(out_file, "rb") as v:
-                bot.send_video(cid, v, caption="✅ **Your AI Video is Ready!**")
-            temp_files.append(out_file)
+            final_vid = f"final_{cid}.mp4"
+            list_fn = f"list_{cid}.txt"
+            with open(list_fn, "w") as f:
+                for c in clips: f.write(f"file '{c}'\n")
+            
+            subprocess.run(f"ffmpeg -y -f concat -safe 0 -i {list_fn} -c copy {final_vid}", shell=True)
+            
+            with open(final_vid, "rb") as v:
+                bot.send_video(cid, v, caption="✅ **वीडियो तैयार है!**")
+            temp_files.extend([final_vid, list_fn])
+
     except Exception as e:
-        bot.send_message(cid, f"❌ Error: {str(e)}")
+        bot.send_message(cid, f"❌ Error: {e}")
     finally:
-        for c in clips: c.close()
         for f in temp_files:
             if os.path.exists(f): os.remove(f)
-        bot.delete_message(cid, status.message_id)
+        bot.delete_message(cid, msg.message_id)
 
 if __name__ == "__main__":
-    setup_assets()
-    keep_alive()
+    threading.Thread(target=run_server, daemon=True).start()
     bot.polling(none_stop=True)
-  
+    
