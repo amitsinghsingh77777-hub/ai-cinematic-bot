@@ -1,0 +1,8 @@
+pyTelegramBotAPI
+moviepy==1.0.3
+edge-tts
+requests
+flask
+gunicorn
+imageio==2.4.1
+imageio-ffmpeg
