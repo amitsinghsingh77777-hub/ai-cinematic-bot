@@ -1,87 +1,62 @@
-import os, re, requests, asyncio, threading, subprocess
+import os
 import telebot
 from flask import Flask
-from urllib.parse import quote
+from threading import Thread
+from huggingface_hub import InferenceClient
+import io
 
-# --- CONFIGURATION ---
-API_TOKEN = "8759756266:AAFhYXRnpeTOFpgVCEuNC_EQQKDHLv1i_uw" # <-- अपना नया टोकन यहाँ डालें
-bot = telebot.TeleBot(API_TOKEN)
-ALLOWED_USER_ID = 5177831693 
+# 1. Render को 'जिंदा' रखने के लिए वेब सर्वर सेटअप
+app = Flask('')
 
-app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot is Alive!"
+def home():
+    return "Bot is Running!"
 
-def run_server():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+def run():
+    # Render स्वचालित रूप से PORT प्रदान करता है
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
-def get_image(text, i):
-    try:
-        encoded_prompt = quote(f"3d disney pixar style, {text}, cinematic lighting, 9:16 aspect ratio")
-        url = f"https://pollinations.ai{encoded_prompt}?width=720&height=1280&seed={i}&model=flux&nologo=true"
-        r = requests.get(url, timeout=30)
-        path = f"img_{i}.jpg"
-        with open(path, 'wb') as f: f.write(r.content)
-        return path
-    except: return None
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
+# 2. बॉट और AI क्लाइंट सेटअप
+# टोकन सीधा कोड में न डालें, Render के 'Environment Variables' में सेट करें
+TOKEN = os.environ.get('TELEGRAM_TOKEN')
+HF_TOKEN = os.environ.get('HF_TOKEN')
+
+bot = telebot.TeleBot(TOKEN)
+client = InferenceClient(token=HF_TOKEN)
+
+# 3. बॉट कमांड्स
 @bot.message_handler(commands=['start'])
-def welcome(m):
-    if m.chat.id != ALLOWED_USER_ID:
-        bot.reply_to(m, "❌ Access Denied!")
-        return
-    bot.reply_to(m, "🎬 **नमस्ते मालिक!** कहानी भेजें।")
+def send_welcome(message):
+    bot.reply_to(message, "नमस्ते! मुझे अपनी कहानी भेजें, मैं उसकी AI इमेज बनाऊंगा।")
 
-@bot.message_handler(func=lambda m: True)
-def process_video(m):
-    cid = m.chat.id
-    if cid != ALLOWED_USER_ID: return
-
-    msg = bot.reply_to(m, "⏳ **वीडियो बन रहा है...**")
-    sentences = [s.strip() for s in re.split(r'[।|?|!|\n]', m.text) if len(s.strip()) > 3][:5]
-    clips = []
-    temp_files = []
-
+@bot.message_handler(func=lambda message: True)
+def handle_story(message):
+    msg = bot.reply_to(message, "🎨 आपकी कहानी से इमेज तैयार की जा रही है...")
+    
     try:
-        for i, line in enumerate(sentences):
-            v_path = f"v_{i}.mp3"; out = f"p_{i}.mp4"
-            temp_files.extend([v_path, out])
-            
-            # आवाज़ के लिए 'google_tts' का सरल इस्तेमाल
-            tts_url = f"https://google.com{quote(line)}&tl=hi&client=tw-ob"
-            r = requests.get(tts_url)
-            with open(v_path, 'wb') as f: f.write(r.content)
+        # AI मॉडल का उपयोग करके इमेज जनरेट करना
+        prompt = f"Cinematic masterpiece, 4k, high detail: {message.text}"
+        image = client.text_to_image(prompt, model="black-forest-labs/FLUX.1-schnell")
 
-            img_path = get_image(line, i)
-            if not img_path: continue
-            temp_files.append(img_path)
-            
-            cmd = (
-                f'ffmpeg -y -loop 1 -i {img_path} -i {v_path} -vf '
-                f'"scale=720:1280,format=yuv420p,drawtext=text=\'{line[:40]}...\':fontcolor=yellow:fontsize=35:x=(w-text_w)/2:y=h-300:box=1:boxcolor=black@0.6" '
-                f'-c:v libx264 -preset superfast -tune stillimage -c:a aac -shortest {out}'
-            )
-            subprocess.run(cmd, shell=True)
-            if os.path.exists(out): clips.append(out)
-
-        if clips:
-            final_vid = f"final_{cid}.mp4"
-            list_fn = f"list_{cid}.txt"
-            with open(list_fn, "w") as f:
-                for c in clips: f.write(f"file '{c}'\n")
-            subprocess.run(f"ffmpeg -y -f concat -safe 0 -i {list_fn} -c copy {final_vid}", shell=True)
-            with open(final_vid, "rb") as v:
-                bot.send_video(cid, v, caption="✅ तैयार है!")
-            temp_files.extend([final_vid, list_fn])
+        # इमेज को टेलीग्राम पर भेजने के लिए फॉर्मेट करना
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='PNG')
+        img_byte_arr.seek(0)
+        
+        bot.send_photo(message.chat.id, photo=img_byte_arr, caption="✨ आपका सीन तैयार है!")
+        bot.delete_message(message.chat.id, msg.message_id)
 
     except Exception as e:
-        bot.send_message(cid, f"❌ Error: {str(e)}")
-    finally:
-        for f in temp_files:
-            if os.path.exists(f): os.remove(f)
-        bot.delete_message(cid, msg.message_id)
+        bot.reply_to(message, f"❌ एरर आया: {str(e)}")
 
+# 4. बॉट शुरू करना
 if __name__ == "__main__":
-    threading.Thread(target=run_server, daemon=True).start()
-    bot.polling(none_stop=True)
+    keep_alive()  # वेब सर्वर शुरू करें
+    print("Bot is starting...")
+    bot.infinity_polling() # बॉट चालू करें
     
