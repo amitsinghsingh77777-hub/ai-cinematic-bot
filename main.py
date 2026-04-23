@@ -1,62 +1,36 @@
 import os
-import telebot
-from flask import Flask
-from threading import Thread
-from huggingface_hub import InferenceClient
-import io
+import requests
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-# 1. Render को 'जिंदा' रखने के लिए वेब सर्वर सेटअप
-app = Flask('')
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-@app.route('/')
-def home():
-    return "Bot is Running!"
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Send: video <your topic>")
 
-def run():
-    # Render स्वचालित रूप से PORT प्रदान करता है
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
 
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    if text.startswith("video"):
+        topic = text.replace("video", "").strip()
 
-# 2. बॉट और AI क्लाइंट सेटअप
-# टोकन सीधा कोड में न डालें, Render के 'Environment Variables' में सेट करें
-TOKEN = os.environ.get('TELEGRAM_TOKEN')
-HF_TOKEN = os.environ.get('HF_TOKEN')
+        # 1. Fake script (later replace with OpenAI)
+        script = f"{topic} ki ek bhakti kahani..."
 
-bot = telebot.TeleBot(TOKEN)
-client = InferenceClient(token=HF_TOKEN)
+        # 2. Fake voice (placeholder)
+        audio_url = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
 
-# 3. बॉट कमांड्स
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "नमस्ते! मुझे अपनी कहानी भेजें, मैं उसकी AI इमेज बनाऊंगा।")
+        # 3. Fake image
+        image_url = "https://picsum.photos/720/1280"
 
-@bot.message_handler(func=lambda message: True)
-def handle_story(message):
-    msg = bot.reply_to(message, "🎨 आपकी कहानी से इमेज तैयार की जा रही है...")
-    
-    try:
-        # AI मॉडल का उपयोग करके इमेज जनरेट करना
-        prompt = f"Cinematic masterpiece, 4k, high detail: {message.text}"
-        image = client.text_to_image(prompt, model="black-forest-labs/FLUX.1-schnell")
+        # Send response
+        await update.message.reply_text(script)
+        await update.message.reply_audio(audio_url)
+        await update.message.reply_photo(image_url)
 
-        # इमेज को टेलीग्राम पर भेजने के लिए फॉर्मेट करना
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='PNG')
-        img_byte_arr.seek(0)
-        
-        bot.send_photo(message.chat.id, photo=img_byte_arr, caption="✨ आपका सीन तैयार है!")
-        bot.delete_message(message.chat.id, msg.message_id)
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    except Exception as e:
-        bot.reply_to(message, f"❌ एरर आया: {str(e)}")
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT, handle))
 
-# 4. बॉट शुरू करना
-if __name__ == "__main__":
-    keep_alive()  # वेब सर्वर शुरू करें
-    print("Bot is starting...")
-    bot.infinity_polling() # बॉट चालू करें
-    
+app.run_polling()
